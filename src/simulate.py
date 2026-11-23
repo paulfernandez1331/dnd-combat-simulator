@@ -30,6 +30,12 @@ FIGHT_FIELDS = [
     "mean_attack_bonus",
     "start_distance",
     "party_win",
+    "party_slots",
+    "enemy_slots",
+    "party_slot_levels",
+    "enemy_slot_levels",
+    "party_slots_by_level",
+    "enemy_slots_by_level",
 ]
 
 TURN_FIELDS = [

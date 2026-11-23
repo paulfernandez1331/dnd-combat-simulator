@@ -35,6 +35,8 @@ from src.eda import (
     load_runs,
     luck_summary,
     outlier_fights,
+    roster_table,
+    slot_summary,
     pace_points,
     report_brief,
     split_win_rate,
@@ -1104,6 +1106,14 @@ def _batch_caption(fights: pd.DataFrame, run_id: str | None) -> str:
     return f"Showing {run_id}: {len(fights)} fights, {label}, {policy}."
 
 
+def _slot_level_name(level: int) -> str:
+    if 10 <= level % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(level % 10, "th")
+    return f"{level}{suffix}"
+
+
 def analysis_page(catalog) -> None:
     st.header("Analysis")
     st.write(
@@ -1145,6 +1155,64 @@ def analysis_page(catalog) -> None:
         st.metric("Party win rate", _percent(rate), border=True)
         st.metric("Mean rounds", "—" if mean_rounds is None or pd.isna(mean_rounds) else f"{mean_rounds:.1f}", border=True)
         st.metric("Party damage per round", "—" if pace is None else f"{pace:.1f}", border=True)
+
+    rosters = roster_table(RUNS, fights)
+    with st.container(border=True):
+        st.subheader("Creatures")
+        st.caption("The opening roster of each batch. Every fight in that batch uses it.")
+        if rosters.empty or not bool(rosters["saved"].any()):
+            st.write("The roster was not saved.")
+        elif len(rosters) == 1:
+            row = rosters.iloc[0]
+            st.write(f"Party: {row['party']}.")
+            st.write(f"Enemy: {row['enemy']}.")
+        else:
+            shown = rosters.copy()
+            shown["party"] = [value if saved else "Not saved" for value, saved in zip(shown["party"], shown["saved"])]
+            shown["enemy"] = [value if saved else "Not saved" for value, saved in zip(shown["enemy"], shown["saved"])]
+            shown = shown.rename(columns={
+                "run_id": "Batch",
+                "label": "Layout",
+                "party": "Party",
+                "enemy": "Enemy",
+            })
+            st.dataframe(
+                shown.drop(columns=["saved"]),
+                hide_index=True,
+                alt="Party and enemy creatures in each batch",
+            )
+
+    slots = slot_summary(fights)
+    with st.container(border=True):
+        st.subheader("Spell slots")
+        st.caption(
+            "A slot counts when it is spent. A cantrip and a free casting do not. "
+            "The level is the slot used, including an upcast."
+        )
+        if slots.empty:
+            st.write("This batch has no spell slot log.")
+        else:
+            shown = slots.copy()
+            rename = {
+                "side": "Side",
+                "winner": "Winner",
+                "fights": "Fights",
+                "mean_slots": "Mean slots",
+                "mean_slot_levels": "Mean slot levels",
+            }
+            for column in list(shown.columns):
+                if not str(column).startswith("level_"):
+                    continue
+                level = int(str(column).split("_", 1)[1])
+                rename[column] = _slot_level_name(level)
+                shown[column] = shown[column].map(lambda value: f"{float(value):.2f}")
+            shown["mean_slots"] = shown["mean_slots"].map(lambda value: f"{float(value):.2f}")
+            shown["mean_slot_levels"] = shown["mean_slot_levels"].map(lambda value: f"{float(value):.2f}")
+            st.dataframe(
+                shown.rename(columns=rename),
+                hide_index=True,
+                alt="Mean spell slots spent by side and by who won the fight",
+            )
 
     luck = luck_summary(turns, fights)
     with st.container(border=True):
@@ -1416,7 +1484,7 @@ def analysis_page(catalog) -> None:
         "The model writes a short reading of how the fights went. "
         "It is told to interpret the numbers above and not to recite them."
     )
-    brief = report_brief(fights, turns=turns)
+    brief = report_brief(fights, turns=turns, rosters=rosters)
     if st.button("Write the report", width="stretch"):
         try:
             text = write_report(brief)

@@ -41,6 +41,8 @@ from src.eda import (
     living_actions,
     luck_summary,
     pace_points,
+    roster_table,
+    slot_summary,
     outlier_fights,
     report_brief,
     split_win_rate,
@@ -49,6 +51,7 @@ from src.eda import (
     win_rate,
 )
 from src.encounter import Encounter, IllegalAction
+from src.reactions import _spend_known_or_pool
 from src.grid import area_squares, footprint
 from src.paths import CACHE, FIXTURES
 from src.rules import resolve_attack, resolve_save
@@ -857,6 +860,158 @@ def test_luck_summary_splits_dice_by_side_and_winner():
         pd.DataFrame([{"fight_id": "d", "winner": "party"}]),
     )
     assert savage["damage_count"] == 2
+
+
+def _spell(index: str, name: str, level: int) -> SpellRecord:
+    return SpellRecord(
+        index=index,
+        name=name,
+        level=level,
+        kind="attack",
+        casting_time="1 action",
+        duration="instantaneous",
+        concentration=False,
+        range_mode="ranged",
+        range_feet=120,
+        area_type=None,
+        area_size=None,
+        attack_type="ranged",
+        dc_ability=None,
+        dc_success=None,
+        damage=[],
+        healing={},
+        ongoing=False,
+        exclude_reason=None,
+        classes=[],
+    )
+
+
+def test_a_spent_slot_is_counted_and_a_free_casting_is_not():
+    missile = _spell("magic-missile", "Magic Missile", 1)
+    cantrip = _spell("fire-bolt", "Fire Bolt", 0)
+    hero = creature(
+        "hero",
+        "Aria",
+        "party",
+        15,
+        20,
+        (1, 1),
+        spells=[missile, cantrip],
+        slots={1: 2, 3: 1},
+    )
+    hero.traits["free_spells"] = {"magic-missile": "Magic Missile"}
+    hero.uses_max["Magic Missile"] = 1
+    foe = creature("foe", "Goblin", "enemy", 12, 10, (4, 1))
+    encounter = Encounter([hero, foe])
+    encounter.note_slot(hero, 2)
+    encounter.start()
+    assert encounter.summary("gate")["party_slots"] == 0
+    assert encounter._spend_spell_slot(hero, cantrip, 0) == ""
+    assert encounter._spend_spell_slot(hero, missile, 1) == "Magic Missile"
+    assert encounter._spend_spell_slot(hero, missile, 3) == ""
+    summary = encounter.summary("gate")
+    assert summary["party_slots"] == 1
+    assert summary["enemy_slots"] == 0
+    assert summary["party_slot_levels"] == 3
+    assert summary["party_slots_by_level"] == '{"3": 1}'
+    assert summary["enemy_slots_by_level"] == "{}"
+    assert hero.slots[1] == 2
+    assert hero.slots[3] == 0
+    assert hero.uses_left["Magic Missile"] == 0
+
+
+def test_a_reaction_spell_slot_is_counted():
+    shield = _spell("shield", "Shield", 1)
+    hero = creature("hero", "Aria", "party", 15, 20, (1, 1), spells=[shield], slots={1: 2})
+    foe = creature("foe", "Goblin", "enemy", 12, 10, (4, 1))
+    encounter = Encounter([hero, foe])
+    encounter.start()
+    assert _spend_known_or_pool(encounter, hero, "shield", 1) == ""
+    assert encounter.summary("gate")["party_slots"] == 1
+    assert encounter.summary("gate")["party_slot_levels"] == 1
+    assert hero.slots[1] == 1
+    hero.traits["free_spells"] = {"shield": "Shield"}
+    hero.uses_left["Shield"] = 1
+    assert _spend_known_or_pool(encounter, hero, "shield", 1) == "a free casting"
+    assert encounter.summary("gate")["party_slots"] == 1
+    assert hero.slots[1] == 1
+
+
+def test_slot_summary_groups_by_side_and_winner():
+    fights = pd.DataFrame(
+        [
+            {
+                "fight_id": "a",
+                "winner": "party",
+                "party_slots": 2,
+                "enemy_slots": 0,
+                "party_slot_levels": 2,
+                "enemy_slot_levels": 0,
+                "party_slots_by_level": '{"1": 2}',
+                "enemy_slots_by_level": "{}",
+            },
+            {
+                "fight_id": "b",
+                "winner": "party",
+                "party_slots": 0,
+                "enemy_slots": 1,
+                "party_slot_levels": 0,
+                "enemy_slot_levels": 3,
+                "party_slots_by_level": "{}",
+                "enemy_slots_by_level": '{"3": 1}',
+            },
+            {
+                "fight_id": "c",
+                "winner": "enemy",
+                "party_slots": 0,
+                "enemy_slots": 0,
+                "party_slot_levels": 0,
+                "enemy_slot_levels": 0,
+                "party_slots_by_level": "{}",
+                "enemy_slots_by_level": "{}",
+            },
+        ]
+    )
+    summary = slot_summary(fights).set_index(["winner", "side"])
+    assert list(summary.index) == [("party", "party"), ("party", "enemy"), ("enemy", "party"), ("enemy", "enemy")]
+    assert int(summary.loc[("party", "party"), "fights"]) == 2
+    assert float(summary.loc[("party", "party"), "mean_slots"]) == 1
+    assert float(summary.loc[("party", "party"), "mean_slot_levels"]) == 1
+    assert float(summary.loc[("party", "party"), "level_1"]) == 1
+    assert float(summary.loc[("party", "enemy"), "mean_slots"]) == 0.5
+    assert float(summary.loc[("party", "enemy"), "mean_slot_levels"]) == 1.5
+    assert float(summary.loc[("party", "enemy"), "level_3"]) == 0.5
+    assert float(summary.loc[("enemy", "party"), "mean_slots"]) == 0
+    assert "level_2" not in summary.columns
+    assert slot_summary(pd.DataFrame([{"fight_id": "z", "winner": "party"}])).empty
+    text = report_brief(fights)
+    assert "Spell slots for the party in fights won by party: mean 1.00 slots" in text
+    assert "3rd 0.50" in text
+
+
+def test_roster_collapses_repeated_names(tmp_path):
+    run = tmp_path / "batch"
+    run.mkdir()
+    setup = {
+        "label": "gate",
+        "combatants": [
+            {"name": "Aria", "side": "party"},
+            {"name": "Goblin", "side": "enemy"},
+            {"name": "Goblin", "side": "enemy"},
+            {"name": "Wolf", "side": "enemy"},
+        ],
+    }
+    (run / "setup.json").write_text(json.dumps(setup), encoding="utf-8")
+    fights = pd.DataFrame([{"fight_id": "batch-1", "run_id": "batch", "label": "gate", "winner": "party"}])
+    table = roster_table(tmp_path, fights)
+    assert table.iloc[0]["party"] == "Aria"
+    assert table.iloc[0]["enemy"] == "Goblin ×2, Wolf"
+    assert bool(table.iloc[0]["saved"])
+    missing = roster_table(tmp_path, pd.DataFrame([{"run_id": "gone", "label": "elsewhere"}]))
+    assert not bool(missing.iloc[0]["saved"])
+    text = report_brief(fights, rosters=table)
+    assert "Roster for gate: party Aria. enemy Goblin ×2, Wolf." in text
+    assert "The roster was not saved." in report_brief(fights, rosters=missing)
 
 
 def test_living_actions_drop_end_and_a_downed_skip():

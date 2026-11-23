@@ -176,6 +176,7 @@ class Encounter:
         self.over = False
         self.winner: str | None = None
         self.damage_dealt = {"party": 0, "enemy": 0}
+        self.slot_spends: list[tuple[str, int]] = []
         self.blueprint: dict | None = None
         self.mean_cr = 0.0
         self.mean_attack_bonus = 0.0
@@ -247,6 +248,7 @@ class Encounter:
         self.auto_side = None
         self.auto_policy = None
         self.damage_dealt = {"party": 0, "enemy": 0}
+        self.slot_spends = []
 
     def start(self) -> None:
         if self.blueprint:
@@ -268,6 +270,7 @@ class Encounter:
         self.auto_side = None
         self.auto_policy = None
         self.damage_dealt = {"party": 0, "enemy": 0}
+        self.slot_spends = []
         self.round = 1
         self.turn_index = 0
         self.started = True
@@ -678,6 +681,21 @@ class Encounter:
             effect.lines.extend(break_on_attack(actor))
         return effect
 
+    def note_slot(self, actor, level: int) -> None:
+        """Record one spell slot that was actually removed from the pool."""
+        side = getattr(actor, "side", "")
+        spent = int(level)
+        if side in {"party", "enemy"} and spent > 0:
+            self.slot_spends.append((side, spent))
+
+    def _slot_report(self, side: str) -> tuple[int, int, str]:
+        levels = [level for spent_side, level in self.slot_spends if spent_side == side]
+        counts: dict[int, int] = {}
+        for level in levels:
+            counts[level] = counts.get(level, 0) + 1
+        payload = {str(level): counts[level] for level in sorted(counts)}
+        return len(levels), sum(levels), json.dumps(payload)
+
     def _spend_spell_slot(self, actor, spell, slot: int) -> str:
         """Spend a free casting first, then a slot. Returns the free-use name."""
         if spell is None or spell.level <= 0:
@@ -687,6 +705,7 @@ class Encounter:
             actor.uses_left[mapped] = int(actor.uses_left.get(mapped, 0)) - 1
             return str(mapped)
         actor.slots[slot] = actor.slots.get(slot, 0) - 1
+        self.note_slot(actor, slot)
         return ""
 
     def _begin_concentration(self, actor, spell, slot: int) -> None:
@@ -4294,6 +4313,8 @@ class Encounter:
             party_win = 1
         elif self.winner == "enemy":
             party_win = 0
+        party_slots, party_levels, party_hist = self._slot_report("party")
+        enemy_slots, enemy_levels, enemy_hist = self._slot_report("enemy")
         return {
             "fight_id": fight_id,
             "label": self.label,
@@ -4315,4 +4336,10 @@ class Encounter:
             "mean_attack_bonus": round(self.mean_attack_bonus, 4),
             "start_distance": round(self.start_distance, 4),
             "party_win": party_win,
+            "party_slots": party_slots,
+            "enemy_slots": enemy_slots,
+            "party_slot_levels": party_levels,
+            "enemy_slot_levels": enemy_levels,
+            "party_slots_by_level": party_hist,
+            "enemy_slots_by_level": enemy_hist,
         }

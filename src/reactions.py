@@ -725,6 +725,7 @@ def heuristic_choice(encounter, reactor, window: dict, phase: str, offers: list[
 
 def _spend_spell(encounter, reactor, level: int) -> None:
     reactor.slots[level] = int(reactor.slots.get(level, 0)) - 1
+    encounter.note_slot(reactor, level)
     reactor.reaction_available = False
     if encounter.current().id == reactor.id:
         reactor.traits["leveled_cast"] = True

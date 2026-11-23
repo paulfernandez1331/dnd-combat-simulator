@@ -836,7 +836,204 @@ def _luck_lines(summary: dict) -> list[str]:
     return lines
 
 
-def report_brief(fights: pd.DataFrame, coverage: dict | None = None, turns: pd.DataFrame | None = None) -> str:
+def name_list(names: list[str]) -> str:
+    """Opening names in first-seen order. A repeated name collapses to ``Goblin ×2``."""
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for name in names:
+        cleaned = str(name).strip() or "Unnamed"
+        if cleaned not in counts:
+            order.append(cleaned)
+            counts[cleaned] = 0
+        counts[cleaned] += 1
+    if not order:
+        return "—"
+    parts = []
+    for name in order:
+        count = counts[name]
+        parts.append(name if count == 1 else f"{name} ×{count}")
+    return ", ".join(parts)
+
+
+def roster_table(runs_dir: Path, fights: pd.DataFrame) -> pd.DataFrame:
+    """One row per batch on the page. Names come from that batch's setup.json."""
+    columns = ["run_id", "label", "party", "enemy", "saved"]
+    if fights is None or fights.empty or "run_id" not in fights.columns:
+        return pd.DataFrame(columns=columns)
+    seen: list[str] = []
+    for run_id in fights["run_id"].astype(str):
+        if run_id and run_id != "nan" and run_id not in seen:
+            seen.append(run_id)
+    rows = []
+    for run_id in seen:
+        label = ""
+        if "label" in fights.columns:
+            labels = fights.loc[fights["run_id"].astype(str) == run_id, "label"].dropna()
+            if not labels.empty:
+                label = str(labels.iloc[0])
+        party = ""
+        enemy = ""
+        saved = False
+        path = Path(runs_dir) / run_id / "setup.json"
+        if path.is_file():
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                payload = None
+            combatants = payload.get("combatants") if isinstance(payload, dict) else None
+            if isinstance(combatants, list):
+                saved = True
+                if not label and isinstance(payload.get("label"), str):
+                    label = payload["label"]
+                party_names = []
+                enemy_names = []
+                for creature in combatants:
+                    if not isinstance(creature, dict):
+                        continue
+                    name = str(creature.get("name") or "Unnamed")
+                    side = str(creature.get("side") or "")
+                    if side == "party":
+                        party_names.append(name)
+                    elif side == "enemy":
+                        enemy_names.append(name)
+                party = name_list(party_names)
+                enemy = name_list(enemy_names)
+        rows.append({
+            "run_id": run_id,
+            "label": label,
+            "party": party,
+            "enemy": enemy,
+            "saved": saved,
+        })
+    return pd.DataFrame(rows)
+
+
+def _slot_histogram(value) -> dict[int, int]:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return {}
+    if isinstance(value, dict):
+        raw = value
+    else:
+        text = str(value).strip()
+        if not text or text.lower() == "nan":
+            return {}
+        try:
+            raw = json.loads(text)
+        except json.JSONDecodeError:
+            return {}
+    if not isinstance(raw, dict):
+        return {}
+    counts: dict[int, int] = {}
+    for key, count in raw.items():
+        try:
+            level = int(key)
+            number = int(count)
+        except (TypeError, ValueError):
+            continue
+        if level > 0 and number > 0:
+            counts[level] = counts.get(level, 0) + number
+    return counts
+
+
+def slot_summary(fights: pd.DataFrame) -> pd.DataFrame:
+    """Mean slots spent by side and winner. Empty when the fight log has no slot columns."""
+    id_columns = ["side", "winner", "fights", "mean_slots", "mean_slot_levels"]
+    if fights is None or fights.empty:
+        return pd.DataFrame(columns=id_columns)
+    if "party_slots" not in fights.columns or "enemy_slots" not in fights.columns:
+        return pd.DataFrame(columns=id_columns)
+    frame = fights.copy()
+    if "winner" not in frame.columns:
+        frame["winner"] = "unfinished"
+    frame["winner"] = frame["winner"].map(lambda value: "unfinished" if pd.isna(value) else str(value))
+    for column in ("party_slots", "enemy_slots", "party_slot_levels", "enemy_slot_levels"):
+        if column in frame.columns:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+        else:
+            frame[column] = pd.NA
+    known = frame["party_slots"].notna() | frame["enemy_slots"].notna()
+    frame = frame.loc[known].reset_index(drop=True)
+    if frame.empty:
+        return pd.DataFrame(columns=id_columns)
+    frame["_party_hist"] = [
+        _slot_histogram(value) for value in (frame["party_slots_by_level"] if "party_slots_by_level" in frame.columns else [None] * len(frame))
+    ]
+    frame["_enemy_hist"] = [
+        _slot_histogram(value) for value in (frame["enemy_slots_by_level"] if "enemy_slots_by_level" in frame.columns else [None] * len(frame))
+    ]
+    levels = sorted({level for column in ("_party_hist", "_enemy_hist") for hist in frame[column] for level in hist})
+    present = list(dict.fromkeys(frame["winner"].tolist()))
+    winners = [key for key in ("party", "enemy", "draw") if key in present]
+    winners.extend(key for key in present if key not in winners)
+    rows = []
+    for winner in winners:
+        group = frame[frame["winner"] == winner]
+        count = int(len(group))
+        for side in ("party", "enemy"):
+            slots = group[f"{side}_slots"].fillna(0)
+            slot_levels = group[f"{side}_slot_levels"].fillna(0)
+            row = {
+                "side": side,
+                "winner": winner,
+                "fights": count,
+                "mean_slots": float(slots.mean()) if count else 0.0,
+                "mean_slot_levels": float(slot_levels.mean()) if count else 0.0,
+            }
+            hists = group[f"_{side}_hist"]
+            for level in levels:
+                row[f"level_{level}"] = float(sum(hist.get(level, 0) for hist in hists) / count) if count else 0.0
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _roster_lines(rosters: pd.DataFrame | None) -> list[str]:
+    if rosters is None or rosters.empty:
+        return []
+    if "saved" not in rosters.columns or not rosters["saved"].any():
+        return ["The roster was not saved."]
+    lines = []
+    for row in rosters.itertuples(index=False):
+        title = row.label or row.run_id
+        if not row.saved:
+            lines.append(f"Roster for {title} was not saved.")
+            continue
+        lines.append(f"Roster for {title}: party {row.party}. enemy {row.enemy}.")
+    return lines
+
+
+def _ordinal(level: int) -> str:
+    if 10 <= level % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(level % 10, "th")
+    return f"{level}{suffix}"
+
+
+def _slot_lines(fights: pd.DataFrame) -> list[str]:
+    summary = slot_summary(fights)
+    if summary.empty:
+        return ["Spell slots were not logged."]
+    lines = []
+    level_columns = [column for column in summary.columns if str(column).startswith("level_")]
+    for row in summary.itertuples(index=False):
+        parts = [
+            f"Spell slots for the {row.side} in fights won by {row.winner}: "
+            f"mean {row.mean_slots:.2f} slots and mean slot levels {row.mean_slot_levels:.2f} "
+            f"over {int(row.fights)} fights."
+        ]
+        spent = []
+        for column in level_columns:
+            value = getattr(row, column)
+            if value:
+                level = int(str(column).split("_", 1)[1])
+                spent.append(f"{_ordinal(level)} {float(value):.2f}")
+        if spent:
+            parts.append(" " + ", ".join(spent) + ".")
+        lines.append("".join(parts))
+    return lines
+
+
+def report_brief(fights: pd.DataFrame, coverage: dict | None = None, turns: pd.DataFrame | None = None, rosters: pd.DataFrame | None = None) -> str:
     """Plain-text brief the report model is allowed to cite."""
     if fights.empty:
         return "No fights have been saved."
@@ -869,6 +1066,8 @@ def report_brief(fights: pd.DataFrame, coverage: dict | None = None, turns: pd.D
     if turns is not None:
         lines.extend(_factor_lines(fights, fight_factors(fights, turns)))
         lines.extend(_luck_lines(luck_summary(turns, fights)))
+    lines.extend(_roster_lines(rosters))
+    lines.extend(_slot_lines(fights))
     outliers = outlier_fights(fights)
     lines.append(f"Outlier fights by the 1.5 IQR rule on rounds or party damage: {len(outliers)}")
     if not outliers.empty:
