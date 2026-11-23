@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Battle mat</title>
+  <style>
+    :root { --cell: 64px; }
+    html, body { margin: 0; padding: 0; background: transparent; }
+    body {
+      font-family: "Segoe UI", Georgia, sans-serif;
+      color: #2c241c;
+    }
+    #wrap { padding: 2px 2px 8px; }
+    #hint {
+      margin: 0 0 8px;
+      min-height: 1.3em;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+    #north {
+      text-align: center;
+      letter-spacing: 0.18em;
+      font-size: 11px;
+      font-weight: 700;
+      color: #8c6a32;
+      margin: 0 0 4px;
+    }
+    #board {
+      position: relative;
+      width: fit-content;
+      border-radius: 10px;
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.16);
+    }
+    #grid {
+      display: grid;
+      padding-top: 32px;
+      background: #263126;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: inset 0 0 0 2px rgba(208, 175, 112, 0.5);
+    }
+    button { font: inherit; }
+    .cell {
+      width: var(--cell);
+      height: var(--cell);
+      padding: 0;
+      margin: 0;
+      border: 1px solid rgba(208, 175, 112, 0.28);
+      box-sizing: border-box;
+      background: #2a3529;
+      cursor: pointer;
+    }
+    .cell.alt { background: #223022; }
+    .cell.move { background: #2d6b49; }
+    .cell.aim { background: #7d6438; }
+    .cell:hover:not(:disabled) { filter: brightness(1.18); }
+    .cell:focus-visible { outline: 2px solid #d0af70; outline-offset: -3px; }
+    .cell:disabled { cursor: default; }
+    #aura, #amber, #tokens, #wheel {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+    #aura { z-index: 1; }
+    #amber { z-index: 2; }
+    #tokens { z-index: 3; }
+    #wheel { z-index: 5; }
+    .amber {
+      position: absolute;
+      width: var(--cell);
+      height: var(--cell);
+      box-sizing: border-box;
+      background: rgba(224, 168, 74, 0.46);
+      border: 2px solid #e0a84a;
+      border-radius: 4px;
+    }
+    .aura {
+      position: absolute;
+      width: var(--cell);
+      height: var(--cell);
+      box-sizing: border-box;
+      background: rgba(125, 206, 200, 0.28);
+      border: 2px solid rgba(125, 206, 200, 0.9);
+      border-radius: 10px;
+    }
+    .token {
+      position: absolute;
+    }
+    .body {
+      position: absolute;
+      inset: 4px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      color: #fffaf3;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    }
+    .body img.face {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .label {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1px;
+      pointer-events: none;
+      z-index: 2;
+    }
+    .label.above { bottom: calc(100% + 2px); }
+    .label.below { top: calc(100% + 2px); }
+    .token.party .body { background: #3d8f8a; }
+    .token.enemy .body { background: #a24a3d; }
+    .token.marker .body {
+      background: transparent;
+      box-shadow: none;
+    }
+    .token.marker.party .body { color: #7dcec8; border: 2px dashed #7dcec8; }
+    .token.marker.enemy .body { color: #e0a097; border: 2px dashed #e0a097; }
+    .token.target .body, .token.selected .body {
+      box-shadow: 0 0 0 3px #d0af70, 0 1px 2px rgba(0, 0, 0, 0.45);
+    }
+    .token.acting .body {
+      box-shadow: 0 0 0 3px #d0af70, 0 0 0 6px rgba(208, 175, 112, 0.45);
+    }
+    .token.defeated { opacity: 0.38; }
+    .name, .hp-text, .status {
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #f4efe4;
+      text-shadow: 0 1px 2px #000;
+      line-height: 1.05;
+    }
+    .name { font-size: 10px; }
+    .hp-text { font-size: 9px; }
+    .status { font-size: 8px; }
+    .hp {
+      width: 36px;
+      height: 3px;
+      background: #1a1410;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .hp-fill { height: 100%; }
+    .wheel {
+      position: absolute;
+      width: 200px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-height: 0;
+      max-height: 100%;
+      pointer-events: auto;
+    }
+    .wheel.chip {
+      width: auto;
+      max-width: 220px;
+      flex-direction: row;
+      align-items: center;
+      gap: 6px;
+      background: #2a2118;
+      border: 1px solid #d0af70;
+      border-radius: 10px;
+      padding: 4px 6px;
+    }
+    .chip-label {
+      color: #f6edd9;
+      font-weight: 600;
+      padding: 4px 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 140px;
+    }
+    .callout {
+      position: absolute;
+      left: 50%;
+      bottom: 100%;
+      transform: translateX(-50%);
+      margin-bottom: 2px;
+      background: #2a2118;
+      color: #f6edd9;
+      border: 1px solid #d0af70;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 12px;
+      line-height: 1.2;
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .cat, .ability-name, .slot, .cancel { cursor: pointer; border-radius: 8px; line-height: 1.25; }
+    .cat {
+      background: #6e542c;
+      color: #f6edd9;
+      border: 1px solid #d0af70;
+      padding: 8px 10px;
+      text-align: left;
+      font-weight: 600;
+      flex: 0 0 auto;
+    }
+    .cat.open { background: #8c6a32; }
+    .menu {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-height: 0;
+      max-height: 320px;
+      overflow: hidden;
+      background: #2a2118;
+      border: 1px solid #d0af70;
+      border-radius: 10px;
+      padding: 6px;
+    }
+    .menu-scroll {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    .ability-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: 0 0 auto;
+      min-width: 0;
+    }
+    .attack-parent { font-weight: 600; }
+    .ability-name {
+      display: block;
+      width: 100%;
+      background: transparent;
+      color: #f4efe4;
+      border: 0;
+      text-align: left;
+      padding: 6px 8px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 0 0 auto;
+    }
+    .ability-row .ability-name {
+      width: auto;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .ability-name.on, .slot.on { background: #8c6a32; color: #fff8ea; }
+    .slots { display: flex; flex-wrap: nowrap; gap: 4px; padding: 0; flex: 0 0 auto; }
+    .slot {
+      background: #3a2e22;
+      color: #f4efe4;
+      border: 1px solid #d0af70;
+      min-width: 28px;
+      padding: 2px 6px;
+      flex: 0 0 auto;
+    }
+    .cancel {
+      background: #2a2118;
+      color: #e7d7b8;
+      border: 1px solid rgba(208, 175, 112, 0.5);
+      padding: 6px 8px;
+      flex: 0 0 auto;
+    }
+    button:disabled { opacity: 0.55; cursor: default; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <p id="hint"></p>
+    <div id="north">N</div>
+    <div id="board">
+      <div id="grid"></div>
+      <div id="aura"></div>
+      <div id="amber"></div>
+      <div id="tokens"></div>
+      <div id="wheel"></div>
+    </div>
+  </div>
+  <script>
+    const CELL_CAP = 64;
+    const CELL_FLOOR = 8;
+    const LABEL_BAND = 32;
+    let cell = CELL_CAP;
+    let fittedHeight = 0;
+    let current = null;
+    let inputDisabled = false;
+    let openBudget = null;
+    let openAttack = false;
+    let seenActor = undefined;
+
+    function eventId() {
+      return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
+    }
+
+    function post(type, data) {
+      const message = { isStreamlitMessage: true, type: type };
+      if (data) Object.assign(message, data);
+      window.parent.postMessage(message, "*");
+    }
+
+    function send(value) {
+      if (inputDisabled) return;
+      post("streamlit:setComponentValue", { value: value, dataType: "json" });
+    }
+
+    function fit() {
+      const height = Math.ceil(document.getElementById("wrap").getBoundingClientRect().height);
+      const next = Math.max(height, 1);
+      if (next === fittedHeight) return;
+      fittedHeight = next;
+      post("streamlit:setFrameHeight", { height: next });
+    }
+
+    function viewportBudget() {
+      // Width is this frame, which Streamlit has already sized to the column.
+      // Height is the first screen under the mat's place on the page. A scrolled
+      // window must not look like extra room. A failed parent read keeps 64px.
+      const width = document.documentElement.clientWidth;
+      if (!(width > 40)) return null;
+      try {
+        if (window.parent && window.parent !== window) {
+          const frame = window.frameElement;
+          const parentWin = window.parent;
+          const parentHeight = parentWin.innerHeight;
+          if (!frame || !(parentHeight > 0)) return null;
+          let scrolled = parentWin.scrollY || parentWin.pageYOffset || 0;
+          let node = frame.parentElement;
+          while (node) {
+            scrolled += node.scrollTop || 0;
+            node = node.parentElement;
+          }
+          const topInDocument = frame.getBoundingClientRect().top + scrolled;
+          let height = parentHeight - topInDocument - 16;
+          height = Math.min(height, parentHeight - 24);
+          if (!(height > 0)) return null;
+          return { width: width, height: height };
+        }
+      } catch (err) {
+        return null;
+      }
+      return { width: width, height: window.innerHeight };
+    }
+
+    function measureCell() {
+      const budget = viewportBudget();
+      if (!budget || !current) {
+        cell = CELL_CAP;
+      } else {
+        const cols = Math.max(1, current.width | 0);
+        const rows = Math.max(1, current.height | 0);
+        const wrap = document.getElementById("wrap");
+        const wrapStyle = getComputedStyle(wrap);
+        const padX = parseFloat(wrapStyle.paddingLeft) + parseFloat(wrapStyle.paddingRight);
+        const padY = parseFloat(wrapStyle.paddingTop) + parseFloat(wrapStyle.paddingBottom);
+        const hint = document.getElementById("hint");
+        const north = document.getElementById("north");
+        const hintStyle = getComputedStyle(hint);
+        const northStyle = getComputedStyle(north);
+        const above = hint.getBoundingClientRect().height
+          + parseFloat(hintStyle.marginTop) + parseFloat(hintStyle.marginBottom)
+          + north.getBoundingClientRect().height
+          + parseFloat(northStyle.marginTop) + parseFloat(northStyle.marginBottom)
+          + padY;
+        const byWidth = Math.floor((budget.width - padX - 4) / cols);
+        const byHeight = Math.floor((budget.height - above - 4 - LABEL_BAND) / rows);
+        let next = Math.min(CELL_CAP, byWidth, byHeight);
+        if (!isFinite(next) || next > CELL_CAP) next = CELL_CAP;
+        if (next < CELL_FLOOR) next = CELL_FLOOR;
+        cell = next;
+      }
+      document.documentElement.style.setProperty("--cell", cell + "px");
+    }
+
+    function asSet(list) {
+      const marks = new Set();
+      (list || []).forEach(function (cell) { marks.add(cell[0] + "," + cell[1]); });
+      return marks;
+    }
+
+    function cellTop(y) {
+      return LABEL_BAND + (current.height - 1 - y) * cell;
+    }
+
+    function tokenBox(token) {
+      const span = Math.max(1, token.span || 1);
+      const left = token.x * cell;
+      const size = span * cell;
+      const top = LABEL_BAND + (current.height - token.y - span) * cell;
+      return { left: left, top: top, size: size, right: left + size, bottom: top + size };
+    }
+
+    function circleRect(token) {
+      const box = tokenBox(token);
+      return {
+        left: box.left + 4,
+        top: box.top + 4,
+        right: box.right - 4,
+        bottom: box.bottom - 4
+      };
+    }
+
+    function rectsOverlap(a, b) {
+      return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    }
+
+    function paintLayer(id, className, squares) {
+      const layer = document.getElementById(id);
+      layer.replaceChildren();
+      if (!current) return;
+      (squares || []).forEach(function (square) {
+        const x = square[0];
+        const y = square[1];
+        if (x < 0 || y < 0 || x >= current.width || y >= current.height) return;
+        const mark = document.createElement("div");
+        mark.className = className;
+        mark.style.left = (x * cell) + "px";
+        mark.style.top = cellTop(y) + "px";
+        layer.appendChild(mark);
+      });
+    }
+
+    function paintAmber(cells) {
+      paintLayer("amber", "amber", cells);
+    }
+
+    function paintAura(cells) {
+      paintLayer("aura", "aura", cells);
+    }
+
+    function paintGrid() {
+      const spec = current;
+      const grid = document.getElementById("grid");
+      grid.style.gridTemplateColumns = "repeat(" + spec.width + ", " + cell + "px)";
+      grid.replaceChildren();
+      const moves = asSet(spec.move);
+      const aims = asSet(spec.aim);
+      const targets = asSet(spec.targets);
+      const tokens = new Map();
+      (spec.tokens || []).forEach(function (token) {
+        const span = Math.max(1, token.span || 1);
+        for (let dx = 0; dx < span; dx += 1) {
+          for (let dy = 0; dy < span; dy += 1) {
+            tokens.set((token.x + dx) + "," + (token.y + dy), token);
+          }
+        }
+      });
+      for (let y = spec.height - 1; y >= 0; y -= 1) {
+        for (let x = 0; x < spec.width; x += 1) {
+          const key = x + "," + y;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "cell" + ((x + y) % 2 === 0 ? " alt" : "");
+          if (moves.has(key)) button.classList.add("move");
+          if (aims.has(key) || targets.has(key)) button.classList.add("aim");
+          button.dataset.x = String(x);
+          button.dataset.y = String(y);
+          button.disabled = inputDisabled;
+          const token = tokens.get(key);
+          let label = "Square " + x + ", " + y;
+          if (token) {
+            label = token.marker
+              ? token.name
+              : token.name + ", " + token.hp + " of " + token.maxHp + " hit points";
+            if (!token.marker && token.conditions && token.conditions.length) {
+              label += ". " + token.conditions.join(", ");
+            }
+          }
+          if (moves.has(key)) label += ". Move here";
+          if (aims.has(key) || targets.has(key)) label += ". Aim here";
+          button.setAttribute("aria-label", label);
+          grid.appendChild(button);
+        }
+      }
+    }
+
+    function hpColor(pct) {
+      if (pct > 0.5) return "#3f8f4e";
+      if (pct > 0.25) return "#d0af70";
+      return "#c4554a";
+    }
+
+    function labelHits(rect, token) {
+      return (current.tokens || []).some(function (other) {
+        if (other.id === token.id || other.defeated) return false;
+        return rectsOverlap(rect, circleRect(other));
+      });
+    }
+
+    function placeLabel(label, token, box) {
+      const width = label.offsetWidth;
+      const height = label.offsetHeight;
+      const center = box.left + box.size / 2;
+      const above = {
+        left: center - width / 2,
+        top: box.top - 2 - height,
+        right: center + width / 2,
+        bottom: box.top - 2
+      };
+      const below = {
+        left: above.left,
+        top: box.bottom + 2,
+        right: above.right,
+        bottom: box.bottom + 2 + height
+      };
+      let useBelow = above.top < 0;
+      if (!useBelow && labelHits(above, token) && !labelHits(below, token)) useBelow = true;
+      label.classList.toggle("below", useBelow);
+      label.classList.toggle("above", !useBelow);
+    }
+
+    function paintTokens() {
+      const layer = document.getElementById("tokens");
+      layer.replaceChildren();
+      (current.tokens || []).forEach(function (token) {
+        const box = tokenBox(token);
+        const node = document.createElement("div");
+        node.className = "token " + (token.side === "party" ? "party" : "enemy");
+        if (token.acting) node.classList.add("acting");
+        if (token.selected) node.classList.add("selected");
+        if (token.target) node.classList.add("target");
+        if (token.defeated) node.classList.add("defeated");
+        if (token.marker) node.classList.add("marker");
+        node.style.left = box.left + "px";
+        node.style.top = box.top + "px";
+        node.style.width = box.size + "px";
+        node.style.height = box.size + "px";
+
+        const body = document.createElement("div");
+        body.className = "body";
+        const span = Math.max(1, token.span || 1);
+        const cap = Math.min(28, 12 * span);
+        const circle = span * cell - 8;
+        body.style.fontSize = Math.max(8, Math.min(cap, circle * 0.45)) + "px";
+        if (token.image) {
+          const face = document.createElement("img");
+          face.className = "face";
+          face.alt = "";
+          face.src = token.image;
+          face.addEventListener("error", function () {
+            face.remove();
+            body.textContent = token.initials || "?";
+          });
+          body.appendChild(face);
+        } else {
+          body.textContent = token.initials || "?";
+        }
+        const label = document.createElement("div");
+        label.className = "label above";
+        const name = document.createElement("div");
+        name.className = "name";
+        name.textContent = token.name;
+        label.append(name);
+        if (!token.marker) {
+          const hpText = document.createElement("div");
+          hpText.className = "hp-text";
+          hpText.textContent = token.hp + "/" + token.maxHp;
+          const bar = document.createElement("div");
+          bar.className = "hp";
+          bar.style.width = Math.min(36, Math.max(16, cell - 8)) + "px";
+          const fill = document.createElement("div");
+          fill.className = "hp-fill";
+          const pct = token.maxHp <= 0 ? 0 : Math.max(0, Math.min(1, token.hp / token.maxHp));
+          fill.style.width = Math.round(pct * 100) + "%";
+          fill.style.background = hpColor(pct);
+          bar.appendChild(fill);
+          label.append(hpText, bar);
+          if (token.conditions && token.conditions.length) {
+            const status = document.createElement("div");
+            status.className = "status";
+            status.textContent = token.conditions.join(", ");
+            label.append(status);
+          }
+        }
+        if (current.armed && current.armed.needs === "creature" && token.target) {
+          const callout = document.createElement("div");
+          callout.className = "callout";
+          callout.textContent = token.name;
+          label.appendChild(callout);
+        }
+        node.append(body, label);
+        layer.appendChild(node);
+        placeLabel(label, token, box);
+      });
+    }
+
+    function slotLabel(slot) {
+      return slot === 0 ? "Cantrip" : "L" + slot;
+    }
+
+    function menuLimit() {
+      const budget = viewportBudget();
+      const cap = 320;
+      if (!budget) return cap;
+      return Math.max(140, Math.min(cap, budget.height - 72));
+    }
+
+    function fitMenu(menu) {
+      const scroll = menu.querySelector(".menu-scroll");
+      if (!scroll) return;
+      const limit = menuLimit();
+      const cancel = menu.querySelector(":scope > .cancel");
+      const chrome = (cancel ? cancel.offsetHeight : 0) + 16;
+      if (scroll.scrollHeight + chrome > limit) {
+        menu.style.maxHeight = limit + "px";
+        menu.style.height = limit + "px";
+      }
+    }
+
+    function appendAbility(menu, ability) {
+      const slots = ability.slots || [];
+      const armed = current.armed;
+      const armedRow = Boolean(armed) && armed.key === ability.key;
+      const name = document.createElement("button");
+      name.type = "button";
+      name.className = "ability-name" + (armedRow ? " on" : "");
+      name.dataset.action = "ability";
+      name.dataset.key = ability.key;
+      name.dataset.slot = slots.length ? String(slots[0]) : "";
+      name.textContent = ability.label;
+      name.disabled = inputDisabled;
+      if (slots.length > 1) {
+        const row = document.createElement("div");
+        row.className = "ability-row";
+        const chips = document.createElement("div");
+        chips.className = "slots";
+        slots.forEach(function (slot) {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = "slot" + (armedRow && armed.slot === slot ? " on" : "");
+          chip.dataset.action = "slot";
+          chip.dataset.key = ability.key;
+          chip.dataset.slot = String(slot);
+          chip.textContent = slotLabel(slot);
+          chip.disabled = inputDisabled;
+          chips.appendChild(chip);
+        });
+        row.append(name, chips);
+        menu.appendChild(row);
+        return;
+      }
+      menu.appendChild(name);
+    }
+
+    function menuFor(abilities, budget) {
+      const menu = document.createElement("div");
+      menu.className = "menu";
+      const scroll = document.createElement("div");
+      scroll.className = "menu-scroll";
+      const attacks = [];
+      const rest = [];
+      abilities.forEach(function (ability) {
+        if (budget === "action" && ability.kind === "attack") attacks.push(ability);
+        else rest.push(ability);
+      });
+      if (attacks.length) {
+        const parent = document.createElement("button");
+        parent.type = "button";
+        parent.disabled = inputDisabled;
+        if (attacks.length === 1) {
+          const only = attacks[0];
+          const armed = current.armed;
+          const armedRow = Boolean(armed) && armed.key === only.key;
+          parent.className = "ability-name attack-parent" + (armedRow ? " on" : "");
+          parent.dataset.action = "ability";
+          parent.dataset.key = only.key;
+          parent.dataset.slot = only.slots && only.slots.length ? String(only.slots[0]) : "";
+          parent.textContent = "Attack";
+          scroll.appendChild(parent);
+        } else {
+          parent.className = "ability-name attack-parent" + (openAttack ? " on" : "");
+          parent.dataset.action = "attack-menu";
+          parent.textContent = "Attack";
+          scroll.appendChild(parent);
+          if (openAttack) attacks.forEach(function (ability) { appendAbility(scroll, ability); });
+        }
+      }
+      rest.forEach(function (ability) { appendAbility(scroll, ability); });
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "cancel";
+      cancel.dataset.action = "clear";
+      cancel.textContent = "Cancel";
+      cancel.disabled = inputDisabled;
+      menu.append(scroll, cancel);
+      return menu;
+    }
+
+    function aimingAtBoard() {
+      const armed = current && current.armed;
+      return Boolean(armed) && (armed.needs === "creature" || armed.needs === "square" || armed.needs === "facing");
+    }
+
+    function placePanel(panel, actor) {
+      const width = Math.max(panel.offsetWidth || 0, 36);
+      const height = Math.max(panel.offsetHeight || 0, 36);
+      const gap = 8;
+      const box = tokenBox(actor);
+      const boardW = current.width * cell;
+      const boardH = LABEL_BAND + current.height * cell;
+      // Spare room beside a grid that does not fill the window can hold the
+      // wheel. A grid that already fills the window keeps the wheel inside it.
+      const budget = viewportBudget();
+      let maxW = boardW + width + gap;
+      let maxH = boardH + height + gap;
+      if (budget) {
+        const grid = document.getElementById("grid").getBoundingClientRect();
+        maxW = Math.max(boardW, budget.width - Math.max(0, grid.left) - 8);
+        maxH = Math.max(boardH, budget.height - Math.max(0, grid.top) - 8);
+      }
+      const spots = [
+        { left: box.left + box.size + gap, top: box.top },
+        { left: box.left - width - gap, top: box.top },
+        { left: box.left, top: box.bottom + gap },
+        { left: box.left, top: box.top - height - gap },
+        { left: 4, top: boardH + gap }
+      ];
+      const tokens = (current.tokens || []).filter(function (token) { return !token.defeated; }).map(tokenBox);
+      let best = null;
+      let bestScore = Infinity;
+      spots.forEach(function (spot) {
+        if (spot.left < 0 || spot.top < 0) return;
+        if (spot.left + width > maxW || spot.top + height > maxH) return;
+        const rect = { left: spot.left, top: spot.top, right: spot.left + width, bottom: spot.top + height };
+        let score = 0;
+        tokens.forEach(function (token) {
+          if (rect.left < token.right && rect.right > token.left && rect.top < token.bottom && rect.bottom > token.top) score += 1;
+        });
+        if (score < bestScore) {
+          bestScore = score;
+          best = spot;
+        }
+      });
+      if (!best) {
+        best = {
+          left: Math.max(0, Math.min(box.left, Math.max(0, maxW - width))),
+          top: Math.max(0, Math.min(box.top, Math.max(0, maxH - height)))
+        };
+      }
+      if (best.left + width > maxW) best.left = Math.max(0, maxW - width);
+      if (best.top + height > maxH) best.top = Math.max(0, maxH - height);
+      panel.style.left = best.left + "px";
+      panel.style.top = best.top + "px";
+      const board = document.getElementById("board");
+      board.style.minHeight = Math.max(boardH, Math.min(maxH, best.top + height + 8)) + "px";
+      board.style.minWidth = Math.max(boardW, Math.min(maxW, best.left + width + 8)) + "px";
+    }
+
+    function paintWheel() {
+      const host = document.getElementById("wheel");
+      host.replaceChildren();
+      const board = document.getElementById("board");
+      board.style.minHeight = (LABEL_BAND + current.height * cell) + "px";
+      board.style.minWidth = (current.width * cell) + "px";
+      const spec = current;
+      if (!spec || spec.mode !== "combat" || !spec.actorId) return;
+      const actor = (spec.tokens || []).find(function (token) { return token.id === spec.actorId; });
+      if (!actor) return;
+      if (aimingAtBoard()) {
+        const panel = document.createElement("div");
+        panel.className = "wheel chip";
+        const label = document.createElement("div");
+        label.className = "chip-label";
+        label.textContent = spec.armed.label || "Armed";
+        const cancel = document.createElement("button");
+        cancel.type = "button";
+        cancel.className = "cancel";
+        cancel.dataset.action = "clear";
+        cancel.textContent = "Cancel";
+        cancel.disabled = inputDisabled;
+        panel.append(label, cancel);
+        host.appendChild(panel);
+        placePanel(panel, actor);
+        return;
+      }
+      const abilities = spec.abilities || [];
+      const budgets = ["action", "bonus"].filter(function (budget) {
+        return abilities.some(function (item) { return item.budget === budget; });
+      });
+      if (openBudget && budgets.indexOf(openBudget) === -1) openBudget = null;
+      if (!budgets.length) return;
+
+      const panel = document.createElement("div");
+      panel.className = "wheel";
+      budgets.forEach(function (budget) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "cat" + (openBudget === budget ? " open" : "");
+        button.dataset.action = "category";
+        button.dataset.budget = budget;
+        button.textContent = budget === "action" ? "Action" : "Bonus";
+        button.disabled = inputDisabled;
+        panel.appendChild(button);
+        if (openBudget === budget) {
+          panel.appendChild(menuFor(abilities.filter(function (item) { return item.budget === budget; }), budget));
+        }
+      });
+      host.appendChild(panel);
+      const openMenu = panel.querySelector(".menu");
+      if (openMenu) fitMenu(openMenu);
+      placePanel(panel, actor);
+    }
+
+    function paint() {
+      document.getElementById("hint").textContent = current.hint || "";
+      measureCell();
+      paintGrid();
+      paintTokens();
+      paintAura(current.aura || []);
+      paintAmber(current.preview || []);
+      paintWheel();
+      requestAnimationFrame(fit);
+    }
+
+    function onGridClick(event) {
+      const cell = event.target.closest("button.cell");
+      if (!cell || inputDisabled) return;
+      send({
+        kind: "square",
+        x: Number(cell.dataset.x),
+        y: Number(cell.dataset.y),
+        id: eventId()
+      });
+    }
+
+    function onGridOver(event) {
+      const cell = event.target.closest("button.cell");
+      if (!cell || !current) return;
+      const hovered = current.hovers && current.hovers[cell.dataset.x + "," + cell.dataset.y];
+      paintAmber(hovered && hovered.length ? hovered : (current.preview || []));
+    }
+
+    function onGridLeave() {
+      if (current) paintAmber(current.preview || []);
+    }
+
+    function onWheelClick(event) {
+      const button = event.target.closest("button");
+      if (!button || inputDisabled) return;
+      const action = button.dataset.action;
+      if (action === "category") {
+        openBudget = openBudget === button.dataset.budget ? null : button.dataset.budget;
+        paintWheel();
+        requestAnimationFrame(fit);
+        return;
+      }
+      if (action === "attack-menu") {
+        openAttack = !openAttack;
+        paintWheel();
+        requestAnimationFrame(fit);
+        return;
+      }
+      if (action === "clear") {
+        openBudget = null;
+        send({ kind: "clear", id: eventId() });
+        return;
+      }
+      if (action === "ability" || action === "slot") {
+        const raw = button.dataset.slot;
+        send({
+          kind: "ability",
+          key: button.dataset.key,
+          slot: raw === "" ? null : Number(raw),
+          id: eventId()
+        });
+      }
+    }
+
+    let resizePending = false;
+    function scheduleFit() {
+      if (resizePending || !current) return;
+      resizePending = true;
+      requestAnimationFrame(function () {
+        resizePending = false;
+        const previous = cell;
+        measureCell();
+        if (previous !== cell) paint();
+        else fit();
+      });
+    }
+    window.addEventListener("resize", scheduleFit);
+    try {
+      if (window.parent && window.parent !== window) window.parent.addEventListener("resize", scheduleFit);
+    } catch (err) {
+      // A frame that cannot see its parent keeps the squares it already measured.
+    }
+
+    document.getElementById("grid").addEventListener("click", onGridClick);
+    document.getElementById("grid").addEventListener("mouseover", onGridOver);
+    document.getElementById("grid").addEventListener("mouseleave", onGridLeave);
+    document.getElementById("wheel").addEventListener("click", onWheelClick);
+
+    let announced = false;
+
+    window.addEventListener("message", function (event) {
+      const data = event.data;
+      if (!data || data.type !== "streamlit:render") return;
+      const spec = data.args && data.args.spec;
+      if (!spec) return;
+      announced = true;
+      if (data.theme) {
+        if (data.theme.textColor) document.body.style.color = data.theme.textColor;
+        if (data.theme.backgroundColor) document.body.style.background = data.theme.backgroundColor;
+      }
+      inputDisabled = Boolean(data.disabled);
+      if (spec.actorId !== seenActor) {
+        openBudget = null;
+        openAttack = false;
+        seenActor = spec.actorId;
+      }
+      current = spec;
+      if (aimingAtBoard()) {
+        openBudget = null;
+        openAttack = false;
+      } else if (spec.armed) {
+        const match = (spec.abilities || []).find(function (item) { return item.key === spec.armed.key; });
+        if (match) {
+          openBudget = match.budget;
+          if (match.budget === "action" && match.kind === "attack") openAttack = true;
+        }
+      }
+      try {
+        paint();
+      } catch (err) {
+        document.getElementById("hint").textContent = "Board failed to draw: " + err;
+        fit();
+      }
+    });
+
+    function announce() {
+      post("streamlit:componentReady", { apiVersion: 1 });
+    }
+    announce();
+    const readyTimer = setInterval(function () {
+      if (announced) {
+        clearInterval(readyTimer);
+        return;
+      }
+      announce();
+    }, 100);
+  </script>
+</body>
+</html>

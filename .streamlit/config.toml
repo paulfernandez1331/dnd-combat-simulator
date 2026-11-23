@@ -1,0 +1,38 @@
+# Locked dark theme. Colors follow the battle mat.
+# One [theme] section locks appearance; there is no light/dark toggle.
+
+[theme]
+base = "dark"
+primaryColor = "#1f6f6a"
+backgroundColor = "#14110e"
+secondaryBackgroundColor = "#221c17"
+textColor = "#f4efe4"
+linkColor = "#d0af70"
+borderColor = "#4a3b28"
+codeBackgroundColor = "#221c17"
+codeTextColor = "#f4efe4"
+dataframeHeaderBackgroundColor = "#221c17"
+dataframeHeaderTextColor = "#f4efe4"
+dataframeBorderColor = "#4a3b28"
+baseRadius = "8px"
+buttonRadius = "8px"
+showWidgetBorder = true
+showSidebarBorder = true
+font = "'Source Sans 3':https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap"
+headingFont = "'Source Sans 3':https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&display=swap"
+codeFont = "'Source Code Pro':https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;500&display=swap"
+chartCategoricalColors = ["#3d8f8a", "#d0af70", "#a24a3d"]
+paddingTop = "1rem"
+paddingBottom = "1.5rem"
+
+[theme.sidebar]
+backgroundColor = "#221c17"
+secondaryBackgroundColor = "#2e261f"
+codeBackgroundColor = "#2e261f"
+codeTextColor = "#f4efe4"
+textColor = "#f4efe4"
+borderColor = "#5c4a34"
+primaryColor = "#1f6f6a"
+linkColor = "#d0af70"
+paddingTop = "0.75rem"
+paddingBottom = "1rem"
